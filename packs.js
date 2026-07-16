@@ -1,9 +1,14 @@
 // packs.js
 // -----------------------------------------------------------------------
-// Packs now hand out real named players from the free-agent pool (see
-// data.js FREE_AGENTS) instead of generic numeric boosts. Skill players
-// (RB/WR/TE) slot directly into the roster; defensive players join a
-// specific unit (see chemistry.js TAG_TO_UNIT) and boost it.
+// Packs hand out real named players from the free-agent pool (data.js
+// FREE_AGENTS). Skill players (RB/WR/TE) slot directly into the roster;
+// defensive players join a specific unit and boost it.
+//
+// Randomness + no-repeats: pickPlayer() excludes anyone in `owned` (every
+// player you've ever acquired, tracked in state.ownedPlayers and passed in
+// by script.js) so you never get offered the same player twice. Within a
+// single pack, already-offered players are excluded too so one pack can't
+// duplicate itself.
 //
 // Rentals (gamesLeft set) are tracked in state.rentals and reverted by
 // tickRentals() once their games run out. Season-long pickups and unit
@@ -22,9 +27,13 @@ export function describeDefender(tag) {
   return DEF_IMPACT_NOTE[tag] || "impact defender";
 }
 
-function pickPlayer(tier) {
-  const pool = FREE_AGENTS[tier];
-  return pool[Math.floor(Math.random() * pool.length)];
+// Picks a random player from `tier`, excluding names in `excludeSet`.
+// Falls back to the full tier list if everyone in it has already been
+// excluded (keeps the game from breaking late in a season).
+function pickPlayer(tier, excludeSet) {
+  const pool = FREE_AGENTS[tier].filter((p) => !excludeSet.has(p.name));
+  const candidates = pool.length ? pool : FREE_AGENTS[tier];
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
 function isDefensivePlayer(player) {
@@ -44,16 +53,11 @@ function slotSkillPlayer(state, player) {
     roster.te = player;
     return { slot: "te", previous };
   }
-  // WR: replace whichever of the 3 currently has the lowest overall.
   let weakestIdx = 0;
   roster.wrs.forEach((w, i) => { if (w.overall < roster.wrs[weakestIdx].overall) weakestIdx = i; });
   const previous = roster.wrs[weakestIdx];
   roster.wrs[weakestIdx] = player;
   return { slot: "wr", wrIndex: weakestIdx, previous };
-}
-
-function slotDefensePlayer(state, player) {
-  state.roster.defensePlayers.push(player);
 }
 
 function applyUnitUpgrade(state, unit, amount) {
@@ -64,8 +68,9 @@ function weakestUnit(roster) {
   return Object.entries(roster.units).sort((a, b) => a[1] - b[1])[0][0];
 }
 
-function playerOption(id, title, tier, gamesLeft) {
-  const player = pickPlayer(tier);
+// Builds a pack option around an already-picked player object so the
+// caller controls exclusion across the whole pack (see generateWinPack).
+function playerOption(id, title, player, gamesLeft) {
   const isDefense = isDefensivePlayer(player);
   const durationText = gamesLeft ? `on a ${gamesLeft}-game rental` : "for the rest of the season";
   const impactNote = isDefense ? ` This player ${describeDefender(player.tags[0])}.` : "";
@@ -73,10 +78,12 @@ function playerOption(id, title, tier, gamesLeft) {
   return {
     id,
     title,
+    player, // exposed so the UI can render tag chips
     description: `${player.name} (${player.pos}, ${player.overall} OVR) joins your team ${durationText}.${impactNote}`,
     apply: (state) => {
+      state.ownedPlayers.add(player.name);
       if (isDefense) {
-        slotDefensePlayer(state, player);
+        state.roster.defensePlayers.push(player);
         if (gamesLeft) state.rentals.push({ kind: "defense", player, gamesLeft });
       } else {
         const slotInfo = slotSkillPlayer(state, player);
@@ -91,29 +98,49 @@ function unitOption(id, roster, amount) {
   return {
     id,
     title: `${UNIT_LABEL[unit]} Upgrade`,
+    player: null,
     description: `A coaching/depth boost to your ${UNIT_LABEL[unit]} unit (currently your weakest group) for the rest of the season. +${amount} rating.`,
     apply: (state) => applyUnitUpgrade(state, unit, amount),
   };
 }
 
-export function generateWinPack(streak, roster) {
+// `ownedPlayers` is a Set of every player name acquired so far this game --
+// passed in by script.js from state.ownedPlayers.
+export function generateWinPack(streak, roster, ownedPlayers) {
+  const exclude = new Set(ownedPlayers); // local copy so we can dedupe within this pack too
+
+  const rentalPlayer = pickPlayer("superstar", exclude);
+  exclude.add(rentalPlayer.name);
+  const seasonPlayer = pickPlayer("great", exclude);
+  exclude.add(seasonPlayer.name);
+
   const options = [
-    playerOption("rental", "Star Rental", "elite", 5),
-    playerOption("solid_season", "Solid Starter (Season)", "solid", null),
+    playerOption("rental", "Star Rental", rentalPlayer, 2),
+    playerOption("solid_season", "Solid Starter (Season)", seasonPlayer, null),
     unitOption("group_upgrade", roster, 6),
   ];
 
   if (streak > 0 && streak % 3 === 0) {
-    options.push(playerOption("streak_pack", `${streak}-Win Streak Pack`, "elite", null));
+    const streakTier = streak >= 5 ? "superstar" : "great";
+    const streakPlayer = pickPlayer(streakTier, exclude);
+    exclude.add(streakPlayer.name);
+    options.push(playerOption("streak_pack", `${streak}-Win Streak Pack`, streakPlayer, null));
   }
 
   return options;
 }
 
-export function generateLossPack(roster) {
+export function generateLossPack(roster, ownedPlayers) {
+  const exclude = new Set(ownedPlayers);
+
+  const tempPlayer = pickPlayer("solid", exclude);
+  exclude.add(tempPlayer.name);
+  const seasonPlayer = pickPlayer("depth", exclude);
+  exclude.add(seasonPlayer.name);
+
   return [
-    playerOption("temp_solid", "Solid Player (Temporary)", "solid", 4),
-    playerOption("season_meh", "Depth Piece (Season)", "depth", null),
+    playerOption("temp_solid", "Solid Player (Temporary)", tempPlayer, 4),
+    playerOption("season_meh", "Depth Piece (Season)", seasonPlayer, null),
   ];
 }
 

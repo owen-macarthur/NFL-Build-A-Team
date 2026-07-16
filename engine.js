@@ -167,6 +167,56 @@ export function computeQbMultiplier(chosenQb, choiceSet) {
   return +(1 + gap * 0.02).toFixed(2);
 }
 
+// A single number describing how good your final roster is, on roughly
+// the same 0-99 scale as player overalls. Used by computeFinalScore below,
+// and handy to display on its own ("Ending Overall: X").
+export function rosterOverallRating(roster) {
+  const wrAvg = roster.wrs.reduce((s, p) => s + p.overall, 0) / roster.wrs.length;
+  const unitAvg = ["OL", "DL", "LB", "Secondary", "ST"]
+    .map((u) => effectiveUnitRating(roster, u))
+    .reduce((a, b) => a + b, 0) / 5;
+  return (roster.qb.overall + roster.rb.overall + wrAvg + roster.te.overall + unitAvg) / 5;
+}
+
+// The final season score: how well did you actually do, given what you
+// had to work with? Combines four things the player asked for --
+//   - record            (up to 50 pts)
+//   - ending roster overall (up to 30 pts) -- rewards actually building a team
+//   - ending chemistry      (up to 20 pts) -- rewards good pairings, not just talent
+// ...then multiplies the total by your QB multiplier, so drafting a lower
+// QB and still performing well pays off exactly like the original pitch:
+// "did a lot with less."
+export function computeFinalScore(wins, losses, roster, chemistry, qbMultiplier) {
+  const winPct = wins / Math.max(1, wins + losses);
+  const rosterOverall = rosterOverallRating(roster);
+  const rosterFactor = Math.min(1, Math.max(0, (rosterOverall - 60) / 39)); // 60 (all-default) -> 0, 99 -> 1
+  const chemFactor = chemistry / 100;
+
+  const recordPts = winPct * 50;
+  const rosterPts = rosterFactor * 30;
+  const chemPts = chemFactor * 20;
+
+  const rawScore = recordPts + rosterPts + chemPts;
+  const finalScore = Math.round(rawScore * qbMultiplier);
+
+  return {
+    finalScore,
+    letter: toFinalLetterGrade(finalScore),
+    breakdown: { recordPts: Math.round(recordPts), rosterPts: Math.round(rosterPts), chemPts: Math.round(chemPts), rosterOverall: Math.round(rosterOverall), qbMultiplier },
+  };
+}
+
+function toFinalLetterGrade(score) {
+  // rawScore tops out at 100, then gets multiplied by up to ~1.5x for a
+  // heavy-underdog QB pick -- so a max realistic score is around 140-150.
+  if (score >= 130) return "S";
+  if (score >= 105) return "A";
+  if (score >= 80) return "B";
+  if (score >= 55) return "C";
+  if (score >= 35) return "D";
+  return "F";
+}
+
 // Final grade/score for the season, factoring in the QB multiplier.
 export function computeSeasonScore(wins, losses, avgGradeTotal, qbMultiplier) {
   const winPct = wins / Math.max(1, wins + losses);
