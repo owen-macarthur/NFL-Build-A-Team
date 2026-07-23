@@ -4,6 +4,48 @@ An NFL-flavored season game: draft a QB (a *worse* QB earns a bigger score
 multiplier), build chemistry around him, sim your games, and cash in win/loss
 packs to grow your roster.
 
+## What's new in this update (v7)
+
+- **RB/TE bench slots.** Acquiring a 2nd real RB or TE doesn't replace your
+  starter anymore -- it sits alongside them, and whichever has the higher
+  overall automatically becomes the starter (a bench row only shows once
+  you actually have one). A 3rd pickup normally bumps the weakest of the
+  three off the roster, *unless* one of the three is a currently-active
+  rental -- then all three stick around temporarily, since the overflow
+  resolves itself once the rental expires. Bench players give teamStrength
+  a small, deliberately minor bonus -- opponents have no bench field at
+  all, so this never affects CPU teams.
+- **Order changed**: Intro Pack now comes right after the QB draft, and
+  scheme selection comes after that -- so you're picking a scheme around
+  the team you actually have, not the other way around.
+- **"View My Roster" toggle** on the scheme-select and pack screens --
+  shows your current roster inline without leaving the screen or losing
+  any selections in progress.
+- **Fixed: O-Line/unit upgrade cards showing "? ? ?" forever.** Non-player
+  pack options (Unit Upgrades) never had a real "spin" target, so the
+  placeholder text just stuck. Now shows an invented but plausible reason
+  for the boost -- "New O-Line Coach," "Pass-Rush Specialist Hired," etc.
+  -- picked randomly per pull.
+- **Skips the pointless pack after Week 8** if the season's over and
+  playoffs weren't reached -- goes straight to the recap instead of
+  offering a pack for a game that will never be played.
+- **Deferred**: tiered QB draft buckets (one QB per tier instead of pure
+  random) -- holding off until the real roster/ratings data comes in
+  rather than building a throwaway version now.
+
+## What's new in this update (v6)
+
+- **Fixed: Intro Pack defense wasn't actually random.** The `solid` tier
+  had exactly one defender per unit (one pass-rusher, one coverage
+  player, one run-stopper), and the Intro Pack was taking the *entire*
+  filtered list rather than picking one -- so the three defensive options
+  were the literal same three players every single game, no randomness
+  at all. Also fixed a related issue where WR only had 2 total entries
+  in that tier, making it a 50/50 coin flip whenever WR came up. Fixed
+  two ways: `solid` tier expanded to 3-4 players per position/unit, and
+  `generateIntroPack` now picks one at random per unit via a proper
+  `pickOneByTag` helper instead of grabbing everyone that matches.
+
 ## What's new in this update (v5)
 
 - **Team schemes**: pick one offensive scheme (West Coast / Ground & Pound

@@ -32,12 +32,14 @@ export function createDefaultRoster(qb) {
   return {
     qb,
     rb: { name: "Default RB", pos: "RB", overall: 60, tags: [] },
+    rbBench: [], // populates only once you have a 2nd real (non-default) RB
     wrs: [
       { name: "Default WR1", pos: "WR", overall: 60, tags: [] },
       { name: "Default WR2", pos: "WR", overall: 60, tags: [] },
       { name: "Default WR3", pos: "WR", overall: 60, tags: [] },
     ],
     te: { name: "Default TE", pos: "TE", overall: 60, tags: [] },
+    teBench: [], // populates only once you have a 2nd real (non-default) TE
     units: { OL: 60, DL: 60, LB: 60, Secondary: 60, ST: 60 },
     defensePlayers: [],
     offenseScheme: null, // set by the scheme-select screen, before the Intro Pack
@@ -116,13 +118,25 @@ export const FREE_AGENTS = {
   solid: [
     { name: "Courtland Sutton", pos: "WR", overall: 83, tags: ["possession"] },
     { name: "Rashee Rice", pos: "WR", overall: 84, tags: ["slot"] },
+    { name: "Josh Downs", pos: "WR", overall: 78, tags: ["slot"] },
+    { name: "Christian Kirk", pos: "WR", overall: 79, tags: ["possession"] },
     { name: "Rico Dowdle", pos: "RB", overall: 81, tags: ["pure_rusher"] },
     { name: "Chase Brown", pos: "RB", overall: 82, tags: ["receiving_back"] },
+    { name: "Alexander Mattison", pos: "RB", overall: 76, tags: ["pure_rusher"] },
+    { name: "Zack Moss", pos: "RB", overall: 77, tags: ["pure_rusher"] },
     { name: "Evan Engram", pos: "TE", overall: 81, tags: ["possession"] },
     { name: "Dalton Kincaid", pos: "TE", overall: 80, tags: ["possession"] },
+    { name: "Cole Kmet", pos: "TE", overall: 78, tags: ["possession"] },
+    { name: "Noah Fant", pos: "TE", overall: 77, tags: ["possession"] },
     { name: "Jaire Alexander", pos: "CB", overall: 83, tags: ["coverage"] },
+    { name: "Mike Hilton", pos: "CB", overall: 76, tags: ["coverage"] },
+    { name: "Cameron Dantzler", pos: "CB", overall: 75, tags: ["coverage"] },
     { name: "Kyle Van Noy", pos: "EDGE", overall: 80, tags: ["pass_rush"] },
+    { name: "Za'Darius Smith", pos: "EDGE", overall: 81, tags: ["pass_rush"] },
+    { name: "Carl Lawson", pos: "EDGE", overall: 77, tags: ["pass_rush"] },
     { name: "Logan Wilson", pos: "LB", overall: 82, tags: ["run_stopper"] },
+    { name: "Demario Davis", pos: "LB", overall: 83, tags: ["run_stopper"] },
+    { name: "Elandon Roberts", pos: "LB", overall: 78, tags: ["run_stopper"] },
   ],
   depth: [
     { name: "Tutu Atwell", pos: "WR", overall: 73, tags: ["slot"] },

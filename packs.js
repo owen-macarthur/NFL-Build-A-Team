@@ -4,20 +4,28 @@
 // FREE_AGENTS). Skill players (RB/WR/TE) slot directly into the roster;
 // defensive players join a specific unit and boost it.
 //
+// RB/TE now support a bench slot: acquiring a 2nd real (non-default) RB
+// or TE doesn't replace your starter, it sits alongside them -- whichever
+// has the higher overall becomes the starter automatically. A 3rd pickup
+// normally bumps the weakest of the three off the roster entirely, UNLESS
+// one of the three is a currently-active rental, in which case all three
+// stick around temporarily (the rental will resolve the overflow on its
+// own once it expires). The bench contributes a small strength bonus --
+// real, but deliberately minor compared to starter-level impact -- and
+// never applies to CPU opponents (they don't have bench fields at all).
+//
 // WR ordering: after any WR change, roster.wrs is re-sorted descending by
 // overall, so "WR1" always means "your best receiver" regardless of which
-// slot happened to get overwritten.
+// slot happened to get overwritten. WR always keeps exactly 3 entries
+// (backfilling with a Default WR if needed) since all three are starters.
 //
 // Rental tracking is by player OBJECT REFERENCE, not array index or slot
-// name. This matters because WR sorting can shuffle indices around --
-// index-based tracking would revert the wrong slot after a sort. Storing
-// the actual player reference means tickRentals() can always find where
-// that specific player currently lives (or confirm they're already gone)
-// regardless of how the array has been reordered.
-//
-// Slot integrity: slotSkillPlayer() clears out any rental still tracking
-// the exact player object about to be displaced, so an old rental can't
-// later fire and revert to a stale snapshot.
+// name -- tickRentals() finds a rental's player wherever they currently
+// sit (starter, bench, or a WR slot) and removes them directly, rather
+// than reverting to a stored "previous" snapshot. That's what lets a
+// bench player get correctly promoted to starter when the starter's
+// rental expires, and it's generally more robust against roster changes
+// that happen in between.
 //
 // Category-weighted picking: pickPlayer() picks a broad category
 // (WR/RB/TE/DEF) with equal odds first, then a player within it, so the
@@ -37,6 +45,16 @@ const DEF_IMPACT_NOTE = {
   run_stopper: "clogs running lanes -- boosts your Linebackers unit (Run Defense)",
 };
 
+// A few flavor options per unit so the "why did this improve" text feels
+// like something actually happened, not a bare stat bump.
+const UNIT_UPGRADE_FLAVOR = {
+  OL: ["New O-Line Coach", "Offensive Line Overhaul", "Run-Blocking Scheme Tweak"],
+  DL: ["New D-Line Coach", "Pass-Rush Specialist Hired", "Front-Four Retooled"],
+  LB: ["New Linebackers Coach", "Run-Fit Discipline Clicks", "Linebacker Corps Retooled"],
+  Secondary: ["New Defensive Backs Coach", "Coverage Scheme Overhaul", "Secondary Communication Clicks"],
+  ST: ["New Special Teams Coordinator", "Return Game Overhaul", "Coverage Units Retooled"],
+};
+
 export function describeDefender(tag) {
   return DEF_IMPACT_NOTE[tag] || "impact defender";
 }
@@ -47,6 +65,10 @@ function isDefensivePlayer(player) {
 
 function categoryOf(player) {
   return isDefensivePlayer(player) ? "DEF" : player.pos; // "WR" | "RB" | "TE" | "DEF"
+}
+
+function isDefaultPlayer(player) {
+  return player.name.startsWith("Default");
 }
 
 function sortWrsDescending(roster) {
@@ -72,35 +94,58 @@ function pickOnePosition(pool, pos, excludeSet) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+// Same idea, but for defenders: picks one random player matching a
+// specific unit-mapping tag (pass_rush/coverage/run_stopper), rather than
+// taking every matching player in the pool.
+function pickOneByTag(pool, tag, excludeSet) {
+  const candidates = pool.filter((p) => p.tags[0] === tag && !excludeSet.has(p.name));
+  const fallback = pool.filter((p) => p.tags[0] === tag);
+  const list = candidates.length ? candidates : fallback;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function isRentalPlayer(state, player) {
+  return state.rentals.some((r) => r.player === player);
+}
+
 // Removes any rental still tracking this exact player object, so it can't
 // fire a stale revert later after the player's been displaced.
 function clearRentalTrackingFor(state, outgoingPlayer) {
   state.rentals = state.rentals.filter((r) => r.player !== outgoingPlayer);
 }
 
-// Replaces the RB/TE outright, or the weakest current WR (by overall),
-// then re-sorts WRs so WR1 is always the best of the three.
-function slotSkillPlayer(state, player) {
+// Adds a new RB or TE, keeping a starter + optional bench (see file header
+// for the overflow/rental rule).
+function addWithBench(state, starterKey, benchKey, newPlayer) {
   const roster = state.roster;
-  if (player.pos === "RB") {
-    const previous = roster.rb;
-    clearRentalTrackingFor(state, previous);
-    roster.rb = player;
-    return { slot: "rb", previous };
+  const pool = [];
+  if (!isDefaultPlayer(roster[starterKey])) pool.push(roster[starterKey]);
+  pool.push(...roster[benchKey]);
+  pool.push(newPlayer);
+  pool.sort((a, b) => b.overall - a.overall);
+
+  if (pool.length > 2) {
+    const anyRental = pool.some((p) => isRentalPlayer(state, p));
+    if (!anyRental) {
+      const displaced = pool.pop();
+      clearRentalTrackingFor(state, displaced);
+    }
+    // else: temporarily keep all 3 -- resolves itself once the rental expires
   }
-  if (player.pos === "TE") {
-    const previous = roster.te;
-    clearRentalTrackingFor(state, previous);
-    roster.te = player;
-    return { slot: "te", previous };
-  }
+
+  roster[starterKey] = pool[0];
+  roster[benchKey] = pool.slice(1);
+}
+
+// Replaces the weakest current WR (by overall), then re-sorts so WR1 is
+// always the best of the three.
+function slotWr(state, player) {
+  const roster = state.roster;
   let weakestIdx = 0;
   roster.wrs.forEach((w, i) => { if (w.overall < roster.wrs[weakestIdx].overall) weakestIdx = i; });
-  const previous = roster.wrs[weakestIdx];
-  clearRentalTrackingFor(state, previous);
+  clearRentalTrackingFor(state, roster.wrs[weakestIdx]);
   roster.wrs[weakestIdx] = player;
   sortWrsDescending(roster);
-  return { slot: "wr", previous };
 }
 
 function applyUnitUpgrade(state, unit, amount) {
@@ -127,22 +172,27 @@ function playerOption(id, title, player, gamesLeft) {
       state.ownedPlayers.add(player.name);
       if (isDefense) {
         state.roster.defensePlayers.push(player);
-        if (gamesLeft) state.rentals.push({ kind: "defense", player, gamesLeft });
+      } else if (player.pos === "RB") {
+        addWithBench(state, "rb", "rbBench", player);
+      } else if (player.pos === "TE") {
+        addWithBench(state, "te", "teBench", player);
       } else {
-        const slotInfo = slotSkillPlayer(state, player);
-        if (gamesLeft) state.rentals.push({ kind: "skill", player, gamesLeft, ...slotInfo });
+        slotWr(state, player);
       }
+      if (gamesLeft) state.rentals.push({ kind: isDefense ? "defense" : "skill", player, gamesLeft });
     },
   };
 }
 
 function unitOption(id, title, roster, amount) {
   const unit = weakestUnit(roster);
+  const flavor = UNIT_UPGRADE_FLAVOR[unit][Math.floor(Math.random() * UNIT_UPGRADE_FLAVOR[unit].length)];
   return {
     id,
     title: title || `${UNIT_LABEL[unit]} Upgrade`,
     player: null,
-    description: `A coaching/depth boost to your ${UNIT_LABEL[unit]} unit (currently your weakest group) for the rest of the season. +${amount} rating.`,
+    flavorTitle: flavor, // shown in place of the "spin" reveal, since there's no player to pull
+    description: `${flavor}: a boost to your ${UNIT_LABEL[unit]} unit (currently your weakest group) for the rest of the season. +${amount} rating.`,
     apply: (state) => applyUnitUpgrade(state, unit, amount),
   };
 }
@@ -173,8 +223,8 @@ export function generateWinPack(streak, roster, ownedPlayers) {
   return options;
 }
 
-// No more rentals in the loss pack -- a season-long unit boost (smaller
-// than the win-pack version) instead, plus a season-long depth player.
+// No rentals in the loss pack -- a season-long unit boost (smaller than
+// the win-pack version) instead, plus a season-long depth player.
 export function generateLossPack(roster, ownedPlayers) {
   const exclude = new Set(ownedPlayers);
   const seasonPlayer = pickPlayer("depth", exclude);
@@ -199,34 +249,52 @@ export function generateIntroPack(ownedPlayers) {
   const wr = pickOnePosition(offensePool, "WR", exclude); exclude.add(wr.name);
   const te = pickOnePosition(offensePool, "TE", exclude); exclude.add(te.name);
 
+  const dl = pickOneByTag(defensePool, "pass_rush", exclude); exclude.add(dl.name);
+  const lb = pickOneByTag(defensePool, "run_stopper", exclude); exclude.add(lb.name);
+  const sec = pickOneByTag(defensePool, "coverage", exclude); exclude.add(sec.name);
+
   const offense = [rb, wr, te].map((p) => playerOption(`intro_${p.name}`, p.name, p, null));
-  const defense = defensePool.map((p) => playerOption(`intro_${p.name}`, p.name, p, null));
+  const defense = [dl, lb, sec].map((p) => playerOption(`intro_${p.name}`, p.name, p, null));
 
   return { offense, defense };
 }
 
 // Call once per week, at the moment a game is actually simulated, to tick
-// down rentals and revert any that just expired. Finds the current
-// location of the rental's player by reference (not a stale index), so
-// it stays correct even after WR sorting has shuffled the array.
+// down rentals and remove any that just expired -- by reference, wherever
+// they currently sit (starter, bench, WR slot, or defense).
 export function tickRentals(state) {
   state.rentals = state.rentals.filter((r) => {
     r.gamesLeft -= 1;
     if (r.gamesLeft > 0) return true;
-
-    if (r.kind === "skill") {
-      if (r.slot === "rb" && state.roster.rb === r.player) state.roster.rb = r.previous;
-      else if (r.slot === "te" && state.roster.te === r.player) state.roster.te = r.previous;
-      else if (r.slot === "wr") {
-        const idx = state.roster.wrs.indexOf(r.player);
-        if (idx !== -1) {
-          state.roster.wrs[idx] = r.previous;
-          sortWrsDescending(state.roster);
-        }
-      }
-    } else if (r.kind === "defense") {
-      state.roster.defensePlayers = state.roster.defensePlayers.filter((p) => p !== r.player);
-    }
+    removeExpiredPlayer(state, r.player);
     return false;
   });
+}
+
+function removeExpiredPlayer(state, player) {
+  const roster = state.roster;
+
+  if (roster.rb === player) {
+    roster.rb = roster.rbBench.length ? roster.rbBench.shift() : { name: "Default RB", pos: "RB", overall: 60, tags: [] };
+    return;
+  }
+  if (roster.rbBench.includes(player)) {
+    roster.rbBench = roster.rbBench.filter((p) => p !== player);
+    return;
+  }
+  if (roster.te === player) {
+    roster.te = roster.teBench.length ? roster.teBench.shift() : { name: "Default TE", pos: "TE", overall: 60, tags: [] };
+    return;
+  }
+  if (roster.teBench.includes(player)) {
+    roster.teBench = roster.teBench.filter((p) => p !== player);
+    return;
+  }
+  const wrIdx = roster.wrs.indexOf(player);
+  if (wrIdx !== -1) {
+    roster.wrs[wrIdx] = { name: "Default WR", pos: "WR", overall: 60, tags: [] };
+    sortWrsDescending(roster);
+    return;
+  }
+  roster.defensePlayers = roster.defensePlayers.filter((p) => p !== player);
 }

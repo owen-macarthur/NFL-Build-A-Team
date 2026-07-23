@@ -95,7 +95,7 @@ function renderQbSelect() {
     `;
     const choose = () => {
       state = newGameState(team, qb, choices.map((c) => c.qb));
-      renderSchemeSelect();
+      renderIntroPack();
     };
     card.addEventListener("click", choose);
     card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") choose(); });
@@ -115,12 +115,14 @@ function renderSchemeSelect() {
     ${phaseHeading("Scheme Room")}
     <h1>Pick Your Identity</h1>
     <p>One offensive scheme, one defensive scheme. Matchups matter -- the right scheme against the wrong opponent can steal a win.</p>
+    <div id="scheme-roster-toggle"></div>
     <h3>Offense</h3>
     <div class="card-grid" id="off-scheme-grid"></div>
     <h3 style="margin-top:18px;">Defense</h3>
     <div class="card-grid" id="def-scheme-grid"></div>
     <button id="scheme-confirm-btn" style="margin-top:16px; display:none;">Confirm Schemes</button>
   `;
+  attachRosterToggle(document.getElementById("scheme-roster-toggle"));
 
   let chosenOff = null;
   let chosenDef = null;
@@ -174,7 +176,7 @@ function renderSchemeSelect() {
       btn.onclick = () => {
         state.roster.offenseScheme = chosenOff;
         state.roster.defenseScheme = chosenDef;
-        renderIntroPack();
+        renderTeamReveal();
       };
     }
   }
@@ -216,7 +218,7 @@ function renderIntroPack() {
       btn.onclick = () => {
         offense.filter((o) => selectedOffense.has(o.id)).forEach((o) => o.apply(state));
         defense.filter((o) => selectedDefense.has(o.id)).forEach((o) => o.apply(state));
-        renderTeamReveal();
+        renderSchemeSelect();
       };
     } else {
       btn.style.display = "none";
@@ -255,9 +257,10 @@ function buildSpinCard(opt) {
   card.className = "card pack-option";
   card.setAttribute("data-id", opt.id);
   const isNamedReveal = opt.player && opt.title === opt.player.name;
+  const initialText = opt.player ? "? ? ?" : (opt.flavorTitle || opt.title);
   card.innerHTML = `
     <h3>${isNamedReveal ? "New Player" : opt.title}</h3>
-    <div class="spin-name qb-name">? ? ?</div>
+    <div class="spin-name qb-name">${initialText}</div>
     <div class="pack-reveal" style="display:none;"></div>
   `;
   return card;
@@ -323,11 +326,10 @@ function spinAll(options, onAllDone) {
 // ---------------------------------------------------------------------
 // Screen: Team reveal + chemistry breakdown
 // ---------------------------------------------------------------------
-function renderTeamReveal() {
-  const r = state.roster;
-  const chemistry = currentChemistry();
-  const notes = explainChemistry(r);
-
+// Shared roster display (Offense + Defense cards), including RB/TE bench
+// rows when they exist. Used by the team reveal screen and by the
+// "View Roster" toggle available on the scheme-select and pack screens.
+function rosterCardsHtml(r) {
   const defenseByUnit = { DL: [], LB: [], Secondary: [] };
   r.defensePlayers.forEach((p) => {
     const unit = TAG_TO_UNIT[p.tags[0]];
@@ -345,6 +347,56 @@ function renderTeamReveal() {
     `;
   };
 
+  const benchRow = (label, player) => `
+    <div class="roster-row" style="padding-left:16px;"><span class="roster-role">${label}</span><span>${player.name}${tagRow(player.tags)}${rentalBadge(player)}</span><span class="overall-pill">${player.overall}</span></div>
+  `;
+
+  return `
+    <div class="card">
+      <h3>Offense</h3>
+      <div class="roster-row"><span class="roster-role">QB</span><span>${r.qb.name}${tagRow(r.qb.tags)}</span><span class="overall-pill">${r.qb.overall}</span></div>
+      <div class="roster-row"><span class="roster-role">RB</span><span>${r.rb.name}${tagRow(r.rb.tags)}${rentalBadge(r.rb)}</span><span class="overall-pill">${r.rb.overall}</span></div>
+      ${r.rbBench.map((p) => benchRow("RB2", p)).join("")}
+      ${r.wrs.map((w, i) => `<div class="roster-row"><span class="roster-role">WR${i + 1}</span><span>${w.name}${tagRow(w.tags)}${rentalBadge(w)}</span><span class="overall-pill">${w.overall}</span></div>`).join("")}
+      <div class="roster-row"><span class="roster-role">TE</span><span>${r.te.name}${tagRow(r.te.tags)}${rentalBadge(r.te)}</span><span class="overall-pill">${r.te.overall}</span></div>
+      ${r.teBench.map((p) => benchRow("TE2", p)).join("")}
+      <div class="roster-row"><span class="roster-role">OL</span><span>${UNIT_LABEL.OL}</span><span class="overall-pill">${r.units.OL}</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Defense &amp; Special Teams</h3>
+      ${unitRow("DL")}
+      ${unitRow("LB")}
+      ${unitRow("Secondary")}
+      <div class="roster-row"><span class="roster-role">ST</span><span>${UNIT_LABEL.ST}</span><span class="overall-pill">${Math.round(effectiveUnitRating(r, "ST"))}</span></div>
+    </div>
+  `;
+}
+
+// Adds a "View Roster" toggle button to `container` that shows/hides the
+// roster cards inline, without navigating away from the current screen.
+function attachRosterToggle(container) {
+  const btn = document.createElement("button");
+  btn.className = "secondary";
+  btn.textContent = "View My Roster";
+  btn.style.marginBottom = "16px";
+  const panel = document.createElement("div");
+  panel.style.display = "none";
+  panel.innerHTML = rosterCardsHtml(state.roster);
+  btn.addEventListener("click", () => {
+    const showing = panel.style.display !== "none";
+    panel.style.display = showing ? "none" : "";
+    btn.textContent = showing ? "View My Roster" : "Hide My Roster";
+  });
+  container.appendChild(btn);
+  container.appendChild(panel);
+}
+
+function renderTeamReveal() {
+  const r = state.roster;
+  const chemistry = currentChemistry();
+  const notes = explainChemistry(r);
+
   app.innerHTML = `
     ${statusStrip()}
     ${phaseHeading(`Regular Season &middot; Week ${state.week}/${WEEKS_TOTAL}`)}
@@ -360,22 +412,7 @@ function renderTeamReveal() {
       ${notes.length ? `<p>${notes.join(". ")}.</p>` : `<p>No standout tag pairings yet -- get some real skill players via packs to build chemistry.</p>`}
     </div>
 
-    <div class="card">
-      <h3>Offense</h3>
-      <div class="roster-row"><span class="roster-role">QB</span><span>${r.qb.name}${tagRow(r.qb.tags)}</span><span class="overall-pill">${r.qb.overall}</span></div>
-      <div class="roster-row"><span class="roster-role">RB</span><span>${r.rb.name}${tagRow(r.rb.tags)}${rentalBadge(r.rb)}</span><span class="overall-pill">${r.rb.overall}</span></div>
-      ${r.wrs.map((w, i) => `<div class="roster-row"><span class="roster-role">WR${i + 1}</span><span>${w.name}${tagRow(w.tags)}${rentalBadge(w)}</span><span class="overall-pill">${w.overall}</span></div>`).join("")}
-      <div class="roster-row"><span class="roster-role">TE</span><span>${r.te.name}${tagRow(r.te.tags)}${rentalBadge(r.te)}</span><span class="overall-pill">${r.te.overall}</span></div>
-      <div class="roster-row"><span class="roster-role">OL</span><span>${UNIT_LABEL.OL}</span><span class="overall-pill">${r.units.OL}</span></div>
-    </div>
-
-    <div class="card">
-      <h3>Defense &amp; Special Teams</h3>
-      ${unitRow("DL")}
-      ${unitRow("LB")}
-      ${unitRow("Secondary")}
-      <div class="roster-row"><span class="roster-role">ST</span><span>${UNIT_LABEL.ST}</span><span class="overall-pill">${Math.round(effectiveUnitRating(r, "ST"))}</span></div>
-    </div>
+    ${rosterCardsHtml(r)}
 
     <button id="play-btn">Play Week ${state.week}</button>
   `;
@@ -480,6 +517,11 @@ function renderWeekResult(opponent, result) {
   state.gradeHistory.push(result.grades);
   if (result.won) { state.wins++; state.streak++; } else { state.losses++; state.streak = 0; }
 
+  // A pack for a game that will never be played is pointless -- if this
+  // was the last week of the season and playoffs weren't reached, skip
+  // straight to the recap instead of offering a pack.
+  const seasonIsOver = state.week >= WEEKS_TOTAL && state.wins < PLAYOFF_LINE;
+
   app.innerHTML = `
     ${statusStrip()}
     ${phaseHeading(`Regular Season &middot; Week ${state.week} &middot; Result`)}
@@ -493,9 +535,12 @@ function renderWeekResult(opponent, result) {
       <h2>Game Grades</h2>
       ${gradeRowsHtml(result.grades)}
     </div>
-    <button id="pack-btn">Open ${result.won ? "Win" : "Loss"} Pack</button>
+    <button id="pack-btn">${seasonIsOver ? "See Season Recap" : `Open ${result.won ? "Win" : "Loss"} Pack`}</button>
   `;
-  document.getElementById("pack-btn").addEventListener("click", () => renderPackScreen(result.won));
+  document.getElementById("pack-btn").addEventListener("click", () => {
+    if (seasonIsOver) renderRecap(false);
+    else renderPackScreen(result.won);
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -510,8 +555,10 @@ function renderPackScreen(won) {
     ${statusStrip()}
     ${phaseHeading(`${won ? "Win" : "Loss"} Pack`)}
     <h1>Choose Your Reward</h1>
+    <div id="pack-roster-toggle"></div>
     <div id="pack-grid"></div>
   `;
+  attachRosterToggle(document.getElementById("pack-roster-toggle"));
 
   const grid = document.getElementById("pack-grid");
   options.forEach((opt) => {

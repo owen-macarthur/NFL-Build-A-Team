@@ -62,6 +62,15 @@ function getDefenseProfile(entity) {
   };
 }
 
+// A deliberately small bonus for a real (non-default) bench player at RB
+// or TE -- present but minor, never enough to matter as much as an actual
+// starter upgrade. Opponent TEAMS entities have no rbBench/teBench field
+// at all, so this naturally evaluates to 0 for them -- backups only ever
+// help the user's own roster, never a CPU team.
+function benchBonus(bench) {
+  if (!bench || !bench.length) return 0;
+  return bench.reduce((sum, p) => sum + Math.max(0, p.overall - 60) * 0.15, 0);
+}
 // Weighted overall for a full team/roster -- the core "how good are you"
 // number. Deliberately scheme-independent -- schemes affect win
 // probability separately (see netSchemeAdvantage) so this number stays a
@@ -72,12 +81,14 @@ export function teamStrength(entity) {
   const st = entity.units ? effectiveUnitRating(entity, "ST") : OPPONENT_ST;
   const def = getDefenseProfile(entity);
   const defAvg = (def.passRush + def.coverage + def.runStop) / 3;
+  const rbOverall = entity.rb.overall + benchBonus(entity.rbBench);
+  const teOverall = entity.te.overall + benchBonus(entity.teBench);
 
   return (
     entity.qb.overall * 0.28 +
-    entity.rb.overall * 0.12 +
+    rbOverall * 0.12 +
     wrAvg * 0.20 +
-    entity.te.overall * 0.08 +
+    teOverall * 0.08 +
     ol * 0.10 +
     defAvg * 0.17 +
     st * 0.05
@@ -149,7 +160,7 @@ function generateGrades(roster, chemistry) {
   const st = effectiveUnitRating(roster, "ST");
 
   const passGame = roster.qb.overall * 0.5 + wrAvg * 0.2 + ol * 0.15 + (chemistry - 50) * 0.4 + rand(15);
-  const runGame = roster.rb.overall * 0.5 + ol * 0.4 + rand(18);
+  const runGame = roster.rb.overall * 0.5 + benchBonus(roster.rbBench) + ol * 0.4 + rand(18);
   const twoMinute = roster.qb.overall * 0.75 + (chemistry - 50) * 0.5 + rand(15);
   const runDefense = def.runStop + rand(15);
   const passDefense = def.coverage * 0.5 + def.passRush * 0.5 + rand(15);
@@ -270,7 +281,9 @@ export function rosterOverallRating(roster) {
   const unitAvg = ["OL", "DL", "LB", "Secondary", "ST"]
     .map((u) => effectiveUnitRating(roster, u))
     .reduce((a, b) => a + b, 0) / 5;
-  return (roster.qb.overall + roster.rb.overall + wrAvg + roster.te.overall + unitAvg) / 5;
+  const rbOverall = roster.rb.overall + benchBonus(roster.rbBench);
+  const teOverall = roster.te.overall + benchBonus(roster.teBench);
+  return (roster.qb.overall + rbOverall + wrAvg + teOverall + unitAvg) / 5;
 }
 
 // The final season score: record (up to 50 pts) + ending roster overall
